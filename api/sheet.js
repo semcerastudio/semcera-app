@@ -85,8 +85,43 @@ async function updateRow(sheets, sheetId, r) {
   });
 }
 
+const STATUS_REVERSE = {
+  'Pendiente': 'pendiente', 'En espera': 'en_espera', 'En ejecución': 'en_ejecucion',
+  'Para revisar': 'para_revisar', 'En corrección': 'en_correccion',
+  'Aprobado': 'aprobado', 'Entregado': 'entregado', 'Cerrado': 'cerrado',
+};
+
+function parseFd(str) {
+  if (!str) return null;
+  const parts = str.split('.');
+  if (parts.length !== 3) return null;
+  const [d, m, y] = parts;
+  return `20${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}T12:00:00.000Z`;
+}
+
+function rowToOrder([id, fecha, client, project, name, email, taskType, priority, status, deadline, archivos, internalNotes, fechaCierre]) {
+  return {
+    id,
+    createdAt: parseFd(fecha),
+    client,
+    project,
+    name,
+    email,
+    taskType,
+    priority,
+    status: STATUS_REVERSE[status] || status || 'pendiente',
+    deadline: deadline ? parseFd(deadline) : null,
+    driveFiles: archivos ? archivos.split(', ').filter(Boolean).map(n => ({ name: n })) : [],
+    internalNotes: internalNotes || '',
+    deliveredAt: fechaCierre ? parseFd(fechaCierre) : null,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
 export default async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (req.method !== 'GET' && req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
 
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
@@ -104,19 +139,32 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Missing GOOGLE_SHEET_ID' });
   }
 
-  const { action, req: r } = req.body || {};
-  if (!action || !r) {
-    console.error('[sheet] Missing action or req — action:%s hasReq:%s', action, !!r);
-    return res.status(400).json({ error: 'Missing action or req' });
-  }
-
-  console.log('[sheet] action=%s id=%s driveFiles=%d', action, r.id, (r.driveFiles || []).length);
-
   try {
     const auth = new google.auth.OAuth2(clientId, clientSecret);
     auth.setCredentials({ refresh_token: refreshToken });
-
     const sheets = google.sheets({ version: 'v4', auth });
+
+    if (req.method === 'GET') {
+      const response = await sheets.spreadsheets.values.get({
+        spreadsheetId: sheetId,
+        range: 'A:M',
+      });
+      const rows = response.data.values || [];
+      const orders = rows.length > 1
+        ? rows.slice(1).filter(row => row[0]).map(rowToOrder)
+        : [];
+      console.log('[sheet] GET returned %d orders', orders.length);
+      return res.status(200).json({ orders });
+    }
+
+    // POST
+    const { action, req: r } = req.body || {};
+    if (!action || !r) {
+      console.error('[sheet] Missing action or req — action:%s hasReq:%s', action, !!r);
+      return res.status(400).json({ error: 'Missing action or req' });
+    }
+
+    console.log('[sheet] action=%s id=%s driveFiles=%d', action, r.id, (r.driveFiles || []).length);
     await ensureHeaders(sheets, sheetId);
 
     if (action === 'create') await appendRow(sheets, sheetId, r);

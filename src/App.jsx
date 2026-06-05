@@ -574,7 +574,25 @@ export default function App(){
   const[reqs,setReqs]=useState([]);
   const[tid,setTid]=useState("");
   const[loading,setLoading]=useState(true);
-  useEffect(()=>{setReqs(load()||[]);setLoading(false)},[]);
+  useEffect(()=>{
+    async function loadOrders(){
+      try{
+        const r=await fetch('/api/sheet');
+        if(r.ok){
+          const d=await r.json();
+          if(d.orders&&d.orders.length>0){
+            setReqs(d.orders);
+            persist(d.orders);
+            setLoading(false);
+            return;
+          }
+        }
+      }catch(e){console.warn('[SC] sheet load error:',e.message);}
+      setReqs(load()||[]);
+      setLoading(false);
+    }
+    loadOrders();
+  },[]);
   async function addReq(r){
     const u=[r,...reqs];
     setReqs(u);
