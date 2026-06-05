@@ -159,6 +159,8 @@ function Form({go,onNew}){
       try{
         const fdata=new FormData();
         selFiles.forEach(file=>fdata.append("files",file));
+        fdata.append("orderId",id);
+        if(f.project)fdata.append("project",f.project);
         const resp=await fetch("/api/upload",{method:"POST",body:fdata});
         if(resp.ok){const d=await resp.json();driveFiles=d.files||[];}
       }catch(e){console.error("Upload error:",e);}

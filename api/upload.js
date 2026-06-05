@@ -34,12 +34,9 @@ export default async function handler(req, res) {
     const auth = new google.auth.OAuth2(clientId, clientSecret);
     auth.setCredentials({ refresh_token: refreshToken });
 
-    // Verify token exchange before attempting upload
-    let accessToken;
     try {
       const result = await auth.getAccessToken();
-      accessToken = result.token;
-      console.log('[upload] OAuth2 token obtained: %s', !!accessToken);
+      console.log('[upload] OAuth2 token obtained: %s', !!result.token);
     } catch (tokenErr) {
       console.error('[upload] OAuth2 token refresh failed:', tokenErr.message, tokenErr.response?.data);
       return res.status(500).json({ error: `OAuth2 token refresh failed: ${tokenErr.message}` });
@@ -55,6 +52,19 @@ export default async function handler(req, res) {
   }
 }
 
+async function createSubfolder(drive, parentId, folderName) {
+  const res = await drive.files.create({
+    requestBody: {
+      name: folderName,
+      mimeType: 'application/vnd.google-apps.folder',
+      parents: [parentId],
+    },
+    fields: 'id',
+  });
+  console.log('[upload] Subfolder "%s" created: id=%s', folderName, res.data.id);
+  return res.data.id;
+}
+
 function parseAndUpload(req, drive) {
   return new Promise((resolve, reject) => {
     const contentType = req.headers['content-type'] || '';
@@ -65,8 +75,13 @@ function parseAndUpload(req, drive) {
     }
 
     const bb = busboy({ headers: req.headers, limits: { fileSize: 10 * 1024 * 1024 } });
-    const uploads = [];
+    const fields = {};
+    const bufferedFiles = [];
     let fileCount = 0;
+
+    bb.on('field', (name, value) => {
+      fields[name] = value;
+    });
 
     bb.on('file', (_field, fileStream, info) => {
       const safeName = info.filename || `upload-${Date.now()}`;
@@ -75,44 +90,53 @@ function parseAndUpload(req, drive) {
       console.log('[upload] File %d: name="%s" mimeType="%s"', fileCount, safeName, safeMime);
 
       const chunks = [];
-      const uploadPromise = new Promise((ok, fail) => {
+      const bufferPromise = new Promise((ok, fail) => {
         fileStream.on('data', chunk => chunks.push(chunk));
-        fileStream.on('end', async () => {
-          const buffer = Buffer.concat(chunks);
-          console.log('[upload] "%s" buffered %d bytes — calling Drive API...', safeName, buffer.length);
-          try {
-            const createRes = await drive.files.create({
-              requestBody: { name: safeName, parents: [FOLDER_ID] },
-              media: { mimeType: safeMime, body: Readable.from(buffer) },
-              fields: 'id,name,webViewLink',
-            });
-            console.log('[upload] Drive create OK: id=%s', createRes.data.id);
-
-            await drive.permissions.create({
-              fileId: createRes.data.id,
-              requestBody: { role: 'reader', type: 'anyone' },
-            });
-            console.log('[upload] Permissions set for %s', createRes.data.id);
-
-            ok({ name: createRes.data.name, driveId: createRes.data.id, driveLink: createRes.data.webViewLink });
-          } catch (driveErr) {
-            console.error('[upload] Drive API error for "%s": %s — errors: %j — status: %s',
-              safeName, driveErr.message, driveErr.errors, driveErr.status);
-            fail(driveErr);
-          }
-        });
-        fileStream.on('error', err => {
-          console.error('[upload] File stream error for "%s":', safeName, err.message);
-          fail(err);
-        });
+        fileStream.on('end', () => ok({ name: safeName, mime: safeMime, buffer: Buffer.concat(chunks) }));
+        fileStream.on('error', fail);
       });
-      uploads.push(uploadPromise);
+      bufferedFiles.push(bufferPromise);
     });
 
-    bb.on('finish', () => {
+    bb.on('finish', async () => {
       console.log('[upload] Busboy finished — %d file(s) detected', fileCount);
-      Promise.all(uploads).then(resolve).catch(reject);
+      try {
+        const fileInfos = await Promise.all(bufferedFiles);
+
+        const orderId = (fields.orderId || '').trim();
+        const project = (fields.project || '').trim();
+
+        let targetFolderId = FOLDER_ID;
+        if (orderId) {
+          const folderName = project ? `${orderId} - ${project}` : orderId;
+          targetFolderId = await createSubfolder(drive, FOLDER_ID, folderName);
+        }
+
+        const results = await Promise.all(fileInfos.map(async ({ name, mime, buffer }) => {
+          console.log('[upload] "%s" %d bytes → folder %s', name, buffer.length, targetFolderId);
+          const createRes = await drive.files.create({
+            requestBody: { name, parents: [targetFolderId] },
+            media: { mimeType: mime, body: Readable.from(buffer) },
+            fields: 'id,name,webViewLink',
+          });
+          console.log('[upload] Drive create OK: id=%s', createRes.data.id);
+
+          await drive.permissions.create({
+            fileId: createRes.data.id,
+            requestBody: { role: 'reader', type: 'anyone' },
+          });
+          console.log('[upload] Permissions set for %s', createRes.data.id);
+
+          return { name: createRes.data.name, driveId: createRes.data.id, driveLink: createRes.data.webViewLink };
+        }));
+
+        resolve(results);
+      } catch (err) {
+        console.error('[upload] Error after busboy finish:', err.message, err.errors || '');
+        reject(err);
+      }
     });
+
     bb.on('error', err => {
       console.error('[upload] Busboy error:', err.message);
       reject(err);
