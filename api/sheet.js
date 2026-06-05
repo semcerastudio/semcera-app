@@ -3,7 +3,7 @@ import { google } from 'googleapis';
 const HEADERS = [
   'ID', 'Fecha', 'Cliente', 'Proyecto', 'Contacto', 'Email',
   'Tipo de tarea', 'Prioridad', 'Estado', 'Deadline',
-  'Archivos', 'Notas', 'Fecha cierre',
+  'Archivos', 'Referencias', 'Notas', 'Fecha cierre',
 ];
 
 const STATUS_LABELS = {
@@ -31,6 +31,7 @@ function toRow(r) {
     STATUS_LABELS[r.status] || r.status || '',
     r.deadline ? fd(r.deadline) : '',
     (r.driveFiles || []).map(f => f.driveLink || f.name || '').filter(Boolean).join(', '),
+    r.files || '',
     r.internalNotes || '',
     r.deliveredAt ? fd(r.deliveredAt) : '',
   ];
@@ -39,7 +40,7 @@ function toRow(r) {
 async function ensureHeaders(sheets, sheetId) {
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: sheetId,
-    range: 'A1:M1',
+    range: 'A1:N1',
   });
   const existing = res.data.values?.[0] || [];
   if (JSON.stringify(existing) !== JSON.stringify(HEADERS)) {
@@ -56,7 +57,7 @@ async function ensureHeaders(sheets, sheetId) {
 async function appendRow(sheets, sheetId, r) {
   await sheets.spreadsheets.values.append({
     spreadsheetId: sheetId,
-    range: 'A:M',
+    range: 'A:N',
     valueInputOption: 'RAW',
     insertDataOption: 'INSERT_ROWS',
     requestBody: { values: [toRow(r)] },
@@ -79,7 +80,7 @@ async function updateRow(sheets, sheetId, r) {
 
   await sheets.spreadsheets.values.update({
     spreadsheetId: sheetId,
-    range: `A${rowIndex + 1}:M${rowIndex + 1}`,
+    range: `A${rowIndex + 1}:N${rowIndex + 1}`,
     valueInputOption: 'RAW',
     requestBody: { values: [toRow(r)] },
   });
@@ -99,7 +100,7 @@ function parseFd(str) {
   return `20${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}T12:00:00.000Z`;
 }
 
-function rowToOrder([id, fecha, client, project, name, email, taskType, priority, status, deadline, archivos, internalNotes, fechaCierre]) {
+function rowToOrder([id, fecha, client, project, name, email, taskType, priority, status, deadline, archivos, referencias, internalNotes, fechaCierre]) {
   return {
     id,
     createdAt: parseFd(fecha),
@@ -112,6 +113,7 @@ function rowToOrder([id, fecha, client, project, name, email, taskType, priority
     status: STATUS_REVERSE[status] || status || 'pendiente',
     deadline: deadline ? parseFd(deadline) : null,
     driveFiles: archivos ? archivos.split(', ').filter(Boolean).map(n => ({ name: n })) : [],
+    files: referencias || '',
     internalNotes: internalNotes || '',
     deliveredAt: fechaCierre ? parseFd(fechaCierre) : null,
     updatedAt: new Date().toISOString(),
@@ -147,7 +149,7 @@ export default async function handler(req, res) {
     if (req.method === 'GET') {
       const response = await sheets.spreadsheets.values.get({
         spreadsheetId: sheetId,
-        range: 'A:M',
+        range: 'A:N',
       });
       const rows = response.data.values || [];
       const orders = rows.length > 1
