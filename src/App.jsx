@@ -165,7 +165,7 @@ function Form({go,onNew}){
         if(resp.ok){const d=await resp.json();driveFiles=d.files||[];}
       }catch(e){console.error("Upload error:",e);}
     }
-    const r={id,...f,driveFiles,status:"pendiente",priority:f.urgency,assignee:null,internalNotes:"",corrections:0,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),deliveredAt:null};
+    const r={id,...f,driveFiles,status:"pendiente",priority:f.urgency,assignee:null,internalNotes:"",responsable:"",corrections:0,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),deliveredAt:null};
     await onNew(r);
     setDone(id);
     setBusy(false);
@@ -389,9 +389,10 @@ function Track({go,reqs,initId}){
 
 function Modal({req,onClose,onUpd}){
   const[notes,setNotes]=useState(req.internalNotes||"");
+  const[responsable,setResponsable]=useState(req.responsable||"");
   const[saving,setSaving]=useState(false);
   const nexts=FLOW[req.status]||[];
-  async function save(extra={}){setSaving(true);await onUpd(req.id,{internalNotes:notes,...extra});setSaving(false)}
+  async function save(extra={}){setSaving(true);await onUpd(req.id,{internalNotes:notes,responsable,...extra});setSaving(false)}
   return<div onClick={e=>e.target===e.currentTarget&&onClose()} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",zIndex:100,display:"flex",alignItems:"flex-end",justifyContent:"center",fontFamily:"'IBM Plex Sans',system-ui"}}>
     <div style={{background:B.bg1,border:`1px solid ${B.border}`,borderRadius:"2px 2px 0 0",width:"100%",maxWidth:"620px",maxHeight:"92vh",overflowY:"auto",padding:"28px"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"24px"}}>
@@ -411,6 +412,7 @@ function Modal({req,onClose,onUpd}){
       <div style={{marginBottom:"16px"}}><label style={S.label}>Asignar a</label><div style={{display:"flex",gap:"6px",flexWrap:"wrap"}}>
         {[null,"cadista","arquitecto"].map(a=><button key={String(a)} onClick={()=>save({assignee:a})} style={{padding:"7px 16px",borderRadius:"2px",border:"1px solid",borderColor:req.assignee===a?B.gold:B.border,background:"transparent",color:req.assignee===a?B.gold:B.text3,cursor:"pointer",fontSize:"11px",fontWeight:"600",fontFamily:"'IBM Plex Mono',monospace"}}>{a===null?"—":a==="cadista"?"CADISTA":"ARQUITECTO"}</button>)}
       </div></div>
+      <div style={{marginBottom:"16px"}}><label style={S.label}>Responsable</label><input value={responsable} onChange={e=>setResponsable(e.target.value)} placeholder="Nombre de quien lleva el pedido" style={S.input}/></div>
       <div style={{marginBottom:"16px"}}><label style={S.label}>Prioridad</label><div style={{display:"flex",gap:"6px",flexWrap:"wrap"}}>
         {Object.entries(PRIO).map(([p,cfg])=><button key={p} onClick={()=>save({priority:p})} style={{padding:"7px 16px",borderRadius:"2px",border:"1px solid",borderColor:req.priority===p?cfg.c:B.border,background:"transparent",color:req.priority===p?cfg.c:B.text3,cursor:"pointer",fontSize:"11px",fontWeight:"600",fontFamily:"'IBM Plex Mono',monospace"}}>{cfg.l.toUpperCase()}</button>)}
       </div></div>
@@ -484,6 +486,8 @@ function Dash({go,reqs,setReqs}){
               {cols.sort((a,b)=>["urgente","alta","normal","baja"].indexOf(a.priority)-["urgente","alta","normal","baja"].indexOf(b.priority)).map(r=><div key={r.id} onClick={()=>setSel(r)} style={{...S.card,padding:"12px 14px",cursor:"pointer",borderLeft:`2px solid ${cfg.dot}`,transition:"background 0.15s"}}>
                 <Code style={{display:"block",marginBottom:"5px",fontSize:"10px",color:B.text3}}>{r.id}</Code>
                 <div style={{fontSize:"12px",fontWeight:"600",color:B.text,marginBottom:"4px",lineHeight:1.3}}>{r.taskType}</div>
+                {r.project&&<div style={{fontSize:"11px",color:B.text2,marginBottom:"3px"}}>{r.project}</div>}
+                {r.responsable&&<div style={{fontSize:"10px",color:B.gold,marginBottom:"3px",fontFamily:"'IBM Plex Mono',monospace"}}>{r.responsable}</div>}
                 <div style={{fontSize:"11px",color:B.text3,marginBottom:"8px"}}>{r.client}</div>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><PT p={r.priority}/>{r.deadline&&<Code style={{color:B.text3,fontSize:"10px"}}>{fd(r.deadline)}</Code>}</div>
               </div>)}
@@ -495,7 +499,7 @@ function Dash({go,reqs,setReqs}){
         {!list.length&&<div style={{...S.card,textAlign:"center",color:B.text3,padding:"40px"}}><Code>Sin pedidos registrados</Code></div>}
         {list.map((r,i)=><div key={r.id} onClick={()=>setSel(r)} style={{background:i%2===0?B.bg1:B.bg,padding:"14px 16px",display:"flex",alignItems:"center",gap:"14px",cursor:"pointer",flexWrap:"wrap",borderBottom:`1px solid ${B.border}`}}>
           <Code style={{minWidth:"100px",fontSize:"11px"}}>{r.id}</Code>
-          <div style={{flex:1,minWidth:"120px"}}><div style={{fontWeight:"600",color:B.text,fontSize:"13px"}}>{r.taskType}</div><div style={{fontSize:"11px",color:B.text3}}>{r.client} · {r.name}</div></div>
+          <div style={{flex:1,minWidth:"120px"}}><div style={{fontWeight:"600",color:B.text,fontSize:"13px"}}>{r.taskType}</div>{r.project&&<div style={{fontSize:"11px",color:B.text2}}>{r.project}</div>}<div style={{fontSize:"11px",color:B.text3}}>{r.client} · {r.name}</div></div>
           <PT p={r.priority}/><ST s={r.status}/>
           <Code style={{fontSize:"10px",color:B.text3}}>{fd(r.createdAt)}</Code>
         </div>)}
