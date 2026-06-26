@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import jsPDF from 'jspdf';
 
 const B = {
   bg:"#0F0E0C",bg1:"#161513",bg2:"#1E1C19",bg3:"#252320",
@@ -33,6 +34,145 @@ const PIN="SEM2026";
 const FONTS=`@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap');*{box-sizing:border-box;}::placeholder{color:${B.text3};}select option{background:${B.bg2};}`;
 
 const MES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
+const VALUE_TABLE = {
+  'Plano conforme a obra':450000,'Ajuste CAD':280000,'Detalle técnico':150000,
+  'PDF de obra':180000,'Relevamiento':180000,'APU':800000,
+  'Memoria descriptiva':280000,'Pliego':380000,'Licitación':1800000,
+  'Layout / Arquitectura':350000,'Presentación':220000,
+  'Documentación técnica':650000,'Otro':180000,
+};
+
+function generateMonthlyReport(orders, sheetName) {
+  const doc = new jsPDF({ unit:'mm', format:'a4' });
+  const W=210, PH=297, ML=20, CW=170, FEE=9800000;
+  const month = sheetName.replace('Historial - ','');
+  const fmt = n => '$' + Math.round(Math.abs(n)).toString().replace(/\B(?=(\d{3})+(?!\d))/g,'.');
+  const tc = (...a) => doc.setTextColor(...a);
+  const fc = (...a) => doc.setFillColor(...a);
+  const dc = (...a) => doc.setDrawColor(...a);
+  const fnt = (w,sz) => { doc.setFont('helvetica',w); if(sz) doc.setFontSize(sz); };
+  function trunc(s, maxW) {
+    let t = String(s||'—');
+    if (doc.getTextWidth(t) <= maxW) return t;
+    while (t.length > 0 && doc.getTextWidth(t+'…') > maxW) t = t.slice(0,-1);
+    return t + '…';
+  }
+  let y = 0;
+
+  // ── HEADER ──────────────────────────────────────────────────────────
+  fc(15,14,12); doc.rect(0,0,W,60,'F');
+  fnt('bold',30); tc(200,169,110); doc.text('SC',ML,22);
+  fnt('normal',7.5); tc(115,110,103);
+  doc.text('SEMCERA STUDIO  ·  ARQ. DANIEL UZCÁTEGUI  ·  SEMCERASTUDIO.COM',ML,29);
+  dc(200,169,110); doc.setLineWidth(0.25); doc.line(ML,32.5,W-ML,32.5);
+  fnt('bold',7); tc(200,169,110); doc.text('INFORME MENSUAL',ML,41);
+  fnt('bold',18); tc(255,255,255); doc.text(month.toUpperCase(),ML,54);
+  fnt('bold',26); tc(200,169,110); doc.text(String(orders.length),W-ML,44,{align:'right'});
+  fnt('normal',7); tc(115,110,103); doc.text('PEDIDOS ARCHIVADOS',W-ML,51,{align:'right'});
+  y = 72;
+
+  // ── RESUMEN OPERATIVO ────────────────────────────────────────────────
+  fnt('bold',7); tc(200,169,110); doc.text('§ 01  ·  RESUMEN OPERATIVO',ML,y);
+  dc(60,57,53); doc.setLineWidth(0.15); doc.line(ML,y+2.5,W-ML,y+2.5);
+  y += 10;
+  const lx = orders.filter(o=>o.client==='LX Argentina').length;
+  const lxm = orders.filter(o=>o.client==='LXM UT').length;
+  const byP = {urgente:0,alta:0,normal:0};
+  orders.forEach(o=>{ if(byP[o.priority]!==undefined) byP[o.priority]++; });
+  const cw3 = CW/3;
+  [['TOTAL PEDIDOS',orders.length],['LX ARGENTINA',lx],['LXM UT',lxm]].forEach(([l,v],i)=>{
+    const x=ML+i*cw3;
+    fnt('bold',22); tc(20,20,20); doc.text(String(v),x,y+8);
+    fnt('normal',7); tc(130,125,118); doc.text(l,x,y+13.5);
+  });
+  y += 20;
+  [['URGENTES',byP.urgente],['ALTA',byP.alta],['NORMAL',byP.normal]].forEach(([l,v],i)=>{
+    const x=ML+i*cw3;
+    fnt('bold',14); tc(20,20,20); doc.text(String(v),x,y+5);
+    fnt('normal',7); tc(130,125,118); doc.text(l,x,y+10);
+  });
+  y += 20;
+  dc(210,205,195); doc.setLineWidth(0.15); doc.line(ML,y,W-ML,y);
+  y += 10;
+
+  // ── PEDIDOS ──────────────────────────────────────────────────────────
+  fnt('bold',7); tc(200,169,110); doc.text('§ 02  ·  PEDIDOS DEL MES',ML,y);
+  dc(60,57,53); doc.setLineWidth(0.15); doc.line(ML,y+2.5,W-ML,y+2.5);
+  y += 9;
+  const COLS=[{h:'N° PEDIDO',w:27},{h:'PROYECTO',w:40},{h:'TIPO',w:45},{h:'CLIENTE',w:23},{h:'PRIORIDAD',w:19},{h:'CIERRE',w:16}];
+  const RH=7, HH=6.5;
+  fc(15,14,12); doc.rect(ML,y,CW,HH,'F');
+  let cx=ML; fnt('bold',6.5); tc(175,168,155);
+  COLS.forEach(({h,w})=>{ doc.text(h,cx+2,y+4.5); cx+=w; });
+  y += HH;
+  orders.forEach((o,i)=>{
+    if(y+RH>PH-18){ doc.addPage(); y=20; }
+    if(i%2===0){ fc(248,244,238); doc.rect(ML,y,CW,RH,'F'); }
+    const row=[o.id||'—',o.project||'—',o.taskType||'—',o.client||'—',PRIO[o.priority]?.l||o.priority||'—',fd(o.deliveredAt||o.createdAt)];
+    cx=ML; fnt('normal',7); tc(20,20,20);
+    row.forEach((v,ci)=>{ doc.text(trunc(v,COLS[ci].w-4),cx+2,y+4.5); cx+=COLS[ci].w; });
+    y += RH;
+  });
+  y += 8;
+
+  // ── ANÁLISIS DE VALOR ────────────────────────────────────────────────
+  if(y+50>PH-18){ doc.addPage(); y=20; }
+  fnt('bold',7); tc(200,169,110); doc.text('§ 03  ·  ANÁLISIS DE VALOR DE MERCADO',ML,y);
+  dc(60,57,53); doc.setLineWidth(0.15); doc.line(ML,y+2.5,W-ML,y+2.5);
+  y += 9;
+  const tg={};
+  orders.forEach(o=>{ const t=o.taskType||'Otro'; if(!tg[t])tg[t]={count:0,unit:VALUE_TABLE[t]??180000}; tg[t].count++; });
+  let total=0;
+  fc(15,14,12); doc.rect(ML,y,CW,HH,'F');
+  fnt('bold',6.5); tc(175,168,155);
+  doc.text('TIPO DE TRABAJO',ML+2,y+4.5); doc.text('CANT.',ML+92,y+4.5);
+  doc.text('VALOR UNITARIO',ML+109,y+4.5); doc.text('SUBTOTAL',ML+148,y+4.5);
+  y += HH;
+  Object.entries(tg).forEach(([type,{count,unit}],i)=>{
+    if(y+RH>PH-18){ doc.addPage(); y=20; }
+    const sub=count*unit; total+=sub;
+    if(i%2===0){ fc(248,244,238); doc.rect(ML,y,CW,RH,'F'); }
+    fnt('normal',7); tc(20,20,20);
+    doc.text(trunc(type,88),ML+2,y+4.5);
+    doc.text(String(count),ML+93,y+4.5);
+    doc.text(fmt(unit),ML+109,y+4.5);
+    fnt('bold',7); doc.text(fmt(sub),ML+168,y+4.5,{align:'right'});
+    y += RH;
+  });
+  y += 8;
+
+  // ── RESUMEN FINANCIERO ───────────────────────────────────────────────
+  if(y+48>PH-18){ doc.addPage(); y=20; }
+  fnt('bold',7); tc(200,169,110); doc.text('§ 04  ·  RESUMEN FINANCIERO',ML,y);
+  dc(60,57,53); doc.setLineWidth(0.15); doc.line(ML,y+2.5,W-ML,y+2.5);
+  y += 12;
+  fc(240,236,228); doc.rect(ML,y,CW,10,'F');
+  fnt('normal',9); tc(20,20,20); doc.text('Valor de mercado total',ML+4,y+6.5);
+  fnt('bold',9); tc(60,57,53); doc.text(fmt(total),W-ML-3,y+6.5,{align:'right'});
+  y += 10;
+  fc(248,244,238); doc.rect(ML,y,CW,10,'F');
+  fnt('normal',9); tc(20,20,20); doc.text('Fee mensual del plan',ML+4,y+6.5);
+  fnt('bold',9); tc(130,125,118); doc.text(fmt(FEE),W-ML-3,y+6.5,{align:'right'});
+  y += 10;
+  const ahorro=total-FEE;
+  fc(15,14,12); doc.rect(ML,y,CW,13,'F');
+  fnt('normal',9); tc(255,255,255); doc.text('Ahorro neto del cliente',ML+4,y+8.5);
+  fnt('bold',11); tc(...(ahorro>=0?[92,184,122]:[224,82,82]));
+  doc.text((ahorro>=0?'+':'-')+fmt(ahorro),W-ML-3,y+8.5,{align:'right'});
+
+  // ── FOOTER (todas las páginas) ───────────────────────────────────────
+  const nP=doc.getNumberOfPages();
+  for(let p=1;p<=nP;p++){
+    doc.setPage(p);
+    dc(200,169,110); doc.setLineWidth(0.25); doc.line(ML,PH-14,W-ML,PH-14);
+    fnt('normal',7); tc(130,125,118);
+    doc.text('SemCera  ·  Arq. Daniel Uzcátegui  ·  semcerastudio.com',W/2,PH-9,{align:'center'});
+    if(nP>1) doc.text(`${p} / ${nP}`,W-ML,PH-9,{align:'right'});
+  }
+
+  doc.save(`Informe-${month.replace(/ /g,'-')}.pdf`);
+}
 
 const STORAGE_KEY = "sc-ops-v2";
 
@@ -573,7 +713,10 @@ function Dash({go,reqs,setReqs}){
               </div>}
           </div>
           :<div>
-            <button onClick={()=>{setSelHist(null);setHistOrders([]);}} style={{background:"none",border:"none",color:B.text2,cursor:"pointer",fontSize:"12px",fontFamily:"'IBM Plex Mono',monospace",marginBottom:"16px",padding:0}}>← VOLVER AL HISTORIAL</button>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"16px"}}>
+              <button onClick={()=>{setSelHist(null);setHistOrders([]);}} style={{background:"none",border:"none",color:B.text2,cursor:"pointer",fontSize:"12px",fontFamily:"'IBM Plex Mono',monospace",padding:0}}>← VOLVER AL HISTORIAL</button>
+              {!histLoading&&histOrders.length>0&&<button onClick={()=>generateMonthlyReport(histOrders,selHist)} style={{background:"none",border:`1px solid ${B.gold}`,color:B.gold,padding:"6px 16px",borderRadius:"2px",cursor:"pointer",fontSize:"11px",fontFamily:"'IBM Plex Mono',monospace",letterSpacing:"0.5px",fontWeight:"600"}}>INFORME DEL MES ↓</button>}
+            </div>
             <Code style={{display:"block",marginBottom:"16px"}}>{selHist} · {histOrders.length} pedidos</Code>
             {histLoading
               ?<div style={{...S.card,textAlign:"center",padding:"48px"}}><Code>Cargando...</Code></div>
