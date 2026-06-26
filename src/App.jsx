@@ -32,6 +32,8 @@ const FLOW={
 const PIN="SEM2026";
 const FONTS=`@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap');*{box-sizing:border-box;}::placeholder{color:${B.text3};}select option{background:${B.bg2};}`;
 
+const MES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
 const STORAGE_KEY = "sc-ops-v2";
 
 function load() {
@@ -432,6 +434,21 @@ function Dash({go,reqs,setReqs}){
   const[view,setView]=useState("board");
   const[sel,setSel]=useState(null);
   const[cf,setCf]=useState("all");
+  const[archiveState,setArchiveState]=useState(null);
+  const[histSheets,setHistSheets]=useState([]);
+  const[selHist,setSelHist]=useState(null);
+  const[histOrders,setHistOrders]=useState([]);
+  const[histLoading,setHistLoading]=useState(false);
+  useEffect(()=>{
+    if(auth&&view==='historial'){
+      fetch('/api/archive?action=list').then(r=>r.ok?r.json():{sheets:[]}).then(d=>setHistSheets(d.sheets||[])).catch(()=>{});
+    }
+  },[view,auth]);
+  useEffect(()=>{
+    if(!selHist){setHistOrders([]);return;}
+    setHistLoading(true);
+    fetch(`/api/archive?action=read&sheet=${encodeURIComponent(selHist)}`).then(r=>r.ok?r.json():{orders:[]}).then(d=>{setHistOrders(d.orders||[]);setHistLoading(false);}).catch(()=>setHistLoading(false));
+  },[selHist]);
   function tryLogin(){if(pin.trim()===PIN){setAuth(true);setPinErr(false)}else{setPinErr(true);setPin("")}}
   if(!auth)return<div style={{minHeight:"100vh",background:B.bg,color:B.text,display:"flex",alignItems:"center",justifyContent:"center",padding:"24px",fontFamily:"'IBM Plex Sans',system-ui"}}>
     <style>{FONTS}</style>
@@ -460,12 +477,38 @@ function Dash({go,reqs,setReqs}){
     if(sel?.id===id)setSel(p=>({...p,...ch}));
     syncSheet('update',updated);
   }
-  const NAVS=[{k:"board",l:"Tablero"},{k:"list",l:"Lista"},{k:"metrics",l:"Métricas"}];
+  function currentMonthYear(){const d=new Date();return`${MES[d.getMonth()]} ${d.getFullYear()}`;}
+  async function doArchive(){
+    setArchiveState('running');
+    try{
+      const r=await fetch('/api/archive',{method:'POST'});
+      const d=await r.json();
+      if(r.ok){
+        const r2=await fetch('/api/sheet');
+        if(r2.ok){const d2=await r2.json();if(d2.orders){setReqs(d2.orders);persist(d2.orders);}}
+        const r3=await fetch('/api/archive?action=list');
+        if(r3.ok){const d3=await r3.json();setHistSheets(d3.sheets||[]);}
+        setSelHist(null);setHistOrders([]);
+        setArchiveState({count:d.archived??0,sheetName:d.sheetName});
+      }else{setArchiveState({error:d.error||'Error desconocido'});}
+    }catch(e){setArchiveState({error:e.message});}
+  }
+  const NAVS=[{k:"board",l:"Tablero"},{k:"list",l:"Lista"},{k:"metrics",l:"Métricas"},{k:"historial",l:"Historial"}];
   return<div style={{minHeight:"100vh",background:B.bg,color:B.text,fontFamily:"'IBM Plex Sans',system-ui"}}>
     <style>{FONTS}</style>
     <Bar
       left={<div style={{display:"flex",alignItems:"center",gap:"12px"}}><span style={{fontSize:"16px",fontWeight:"800",letterSpacing:"3px",fontFamily:"'IBM Plex Mono',monospace"}}>SC</span><span style={{color:B.text3,fontFamily:"'IBM Plex Mono',monospace",fontSize:"11px"}}>· Dashboard</span></div>}
-      right={<div style={{display:"flex",gap:"8px"}}><button onClick={()=>go("team")} style={{background:"none",border:`1px solid ${B.border}`,color:B.text2,padding:"6px 14px",borderRadius:"2px",cursor:"pointer",fontSize:"11px",fontFamily:"'IBM Plex Mono',monospace"}}>EQUIPO</button><button onClick={()=>go("home")} style={{background:"none",border:"none",color:B.text3,cursor:"pointer",fontSize:"11px",fontFamily:"'IBM Plex Mono',monospace"}}>SALIR</button></div>}
+      right={<div style={{display:"flex",gap:"8px",alignItems:"center"}}>
+        {archiveState&&typeof archiveState==='object'&&archiveState.count!=null
+          ?<><Code style={{fontSize:"11px",color:archiveState.count>0?B.green:B.text3}}>{archiveState.count>0?`${archiveState.count} archivados ✓`:'Sin cerrados'}</Code><button onClick={()=>setArchiveState(null)} style={{background:"none",border:"none",color:B.text3,cursor:"pointer",fontSize:"12px",lineHeight:1}}>✕</button></>
+          :archiveState&&typeof archiveState==='object'&&archiveState.error
+          ?<><Code style={{fontSize:"11px",color:B.red}}>Error al archivar</Code><button onClick={()=>setArchiveState(null)} style={{background:"none",border:"none",color:B.text3,cursor:"pointer",fontSize:"12px",lineHeight:1}}>✕</button></>
+          :archiveState==='running'
+          ?<Code style={{fontSize:"11px",color:B.text3}}>Archivando...</Code>
+          :<button onClick={()=>setArchiveState('confirm')} style={{background:"none",border:`1px solid ${B.border}`,color:B.text2,padding:"6px 14px",borderRadius:"2px",cursor:"pointer",fontSize:"11px",fontFamily:"'IBM Plex Mono',monospace"}}>ARCHIVAR MES</button>}
+        <button onClick={()=>go("team")} style={{background:"none",border:`1px solid ${B.border}`,color:B.text2,padding:"6px 14px",borderRadius:"2px",cursor:"pointer",fontSize:"11px",fontFamily:"'IBM Plex Mono',monospace"}}>EQUIPO</button>
+        <button onClick={()=>go("home")} style={{background:"none",border:"none",color:B.text3,cursor:"pointer",fontSize:"11px",fontFamily:"'IBM Plex Mono',monospace"}}>SALIR</button>
+      </div>}
       sub={NAVS.map(n=><button key={n.k} onClick={()=>setView(n.k)} style={{background:"none",border:"none",color:view===n.k?B.gold:B.text3,padding:"10px 16px 10px 0",cursor:"pointer",fontSize:"11px",fontFamily:"'IBM Plex Mono',monospace",letterSpacing:"0.5px",borderBottom:`2px solid ${view===n.k?B.gold:"transparent"}`}}>{n.l.toUpperCase()}</button>)}
     />
     <div style={{borderBottom:`1px solid ${B.border}`,padding:"12px 20px",display:"flex",gap:"32px",alignItems:"center",overflowX:"auto"}}>
@@ -515,8 +558,50 @@ function Dash({go,reqs,setReqs}){
           {[["TOTAL PEDIDOS",reqs.length],["ACTIVOS",active],["URGENTES ACTIVOS",urg],["CERRADOS",closed],["ENTREGA EN PLAZO",`${rate}%`]].map(([l,v])=><div key={l} style={{display:"flex",justifyContent:"space-between",padding:"10px 0",borderBottom:`1px solid ${B.border}`}}><span style={{color:B.text3,fontFamily:"'IBM Plex Mono',monospace",fontSize:"10px",letterSpacing:"1px"}}>{l}</span><span style={{color:B.gold,fontFamily:"'IBM Plex Mono',monospace",fontWeight:"700"}}>{v}</span></div>)}
         </div>
       </div>}
+      {view==="historial"&&<div>
+        <Code style={{display:"block",marginBottom:"20px"}}>§ HT · Historial de pedidos archivados</Code>
+        {!selHist
+          ?<div>
+            <p style={{fontSize:"13px",color:B.text2,marginBottom:"16px"}}>Seleccioná un período para ver los pedidos archivados.</p>
+            {!histSheets.length
+              ?<div style={{...S.card,textAlign:"center",padding:"48px"}}><Code style={{display:"block",marginBottom:"8px"}}>Sin historial disponible</Code><p style={{color:B.text2,fontSize:"13px",lineHeight:1.7,margin:0}}>Usá "ARCHIVAR MES" para crear el primer archivo.</p></div>
+              :<div style={{display:"flex",flexDirection:"column",gap:"6px"}}>
+                {histSheets.map(name=><button key={name} onClick={()=>setSelHist(name)} style={{...S.card,padding:"16px 20px",cursor:"pointer",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center",width:"100%",fontFamily:"'IBM Plex Sans',system-ui",border:`1px solid ${B.border}`}}>
+                  <Code style={{fontSize:"13px"}}>{name}</Code>
+                  <span style={{color:B.text3,fontSize:"11px",fontFamily:"'IBM Plex Mono',monospace"}}>VER →</span>
+                </button>)}
+              </div>}
+          </div>
+          :<div>
+            <button onClick={()=>{setSelHist(null);setHistOrders([]);}} style={{background:"none",border:"none",color:B.text2,cursor:"pointer",fontSize:"12px",fontFamily:"'IBM Plex Mono',monospace",marginBottom:"16px",padding:0}}>← VOLVER AL HISTORIAL</button>
+            <Code style={{display:"block",marginBottom:"16px"}}>{selHist} · {histOrders.length} pedidos</Code>
+            {histLoading
+              ?<div style={{...S.card,textAlign:"center",padding:"48px"}}><Code>Cargando...</Code></div>
+              :!histOrders.length
+              ?<div style={{...S.card,textAlign:"center",padding:"48px"}}><Code>Sin pedidos en este período</Code></div>
+              :<div style={{display:"flex",flexDirection:"column",gap:"1px",border:`1px solid ${B.border}`,borderRadius:"2px",overflow:"hidden"}}>
+                {histOrders.map((r,i)=><div key={r.id} style={{background:i%2===0?B.bg1:B.bg,padding:"14px 16px",display:"flex",alignItems:"center",gap:"14px",flexWrap:"wrap",borderBottom:`1px solid ${B.border}`}}>
+                  <Code style={{minWidth:"100px",fontSize:"11px"}}>{r.id}</Code>
+                  <div style={{flex:1,minWidth:"120px"}}><div style={{fontWeight:"600",color:B.text,fontSize:"13px"}}>{r.taskType}</div>{r.project&&<div style={{fontSize:"11px",color:B.text2}}>{r.project}</div>}<div style={{fontSize:"11px",color:B.text3}}>{r.client} · {r.name}</div></div>
+                  <ST s={r.status}/>
+                  <Code style={{fontSize:"10px",color:B.text3}}>{fd(r.createdAt)}</Code>
+                </div>)}
+              </div>}
+          </div>}
+      </div>}
     </div>
     {sel&&<Modal req={sel} onClose={()=>setSel(null)} onUpd={upd}/>}
+    {archiveState==='confirm'&&<div onClick={e=>e.target===e.currentTarget&&setArchiveState(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:"24px",fontFamily:"'IBM Plex Sans',system-ui"}}>
+      <div style={{background:B.bg1,border:`1px solid ${B.border}`,borderRadius:"2px",padding:"32px",maxWidth:"400px",width:"100%"}}>
+        <Code style={{display:"block",marginBottom:"8px",fontSize:"10px",letterSpacing:"1.5px"}}>§ ARCHIVO MENSUAL</Code>
+        <div style={{fontSize:"18px",fontWeight:"600",marginBottom:"12px",color:B.text}}>¿Archivar {currentMonthYear()}?</div>
+        <p style={{color:B.text2,fontSize:"13px",lineHeight:1.7,marginBottom:"24px"}}>Se moverán <strong style={{color:B.text}}>{closed} pedido{closed!==1?"s":""} cerrado{closed!==1?"s":""}</strong> a la hoja <strong style={{color:B.gold}}>"Historial - {currentMonthYear()}"</strong>. Los pedidos activos no se tocarán.</p>
+        <div style={{display:"flex",gap:"10px"}}>
+          <Btn onClick={()=>setArchiveState(null)} variant="ghost" style={{flex:1}}>Cancelar</Btn>
+          <Btn onClick={doArchive} disabled={closed===0} style={{flex:2}}>{closed>0?`Archivar ${closed} pedidos →`:"Sin pedidos cerrados"}</Btn>
+        </div>
+      </div>
+    </div>}
   </div>
 }
 
